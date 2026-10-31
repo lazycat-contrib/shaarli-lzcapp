@@ -1,0 +1,79 @@
+name: Verify Shaarli Release on GitHub
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact LPK release tag
+        required: true
+        default: v0.16.10
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: shaarli-release-verification
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - name: Download exact Release asset on runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSET_NAME="community.lazycat.app.shaarli-${RELEASE_TAG}.lpk"
+          echo "ASSET_NAME=$ASSET_NAME" >> "$GITHUB_ENV"
+          gh release view "$RELEASE_TAG" --json tagName,assets > release-metadata.json
+          gh release download "$RELEASE_TAG" --pattern "$ASSET_NAME" --dir verify-pkg
+      - name: Verify artifact, scoped login fields and license notices
+        shell: python
+        run: |
+          import hashlib,json,os,subprocess,sys,tarfile
+          from pathlib import Path
+          try:
+              import yaml
+          except ImportError:
+              subprocess.check_call([sys.executable,'-m','pip','install','--quiet','PyYAML==6.0.3'])
+              import yaml
+          name=os.environ['ASSET_NAME']
+          meta=json.loads(Path('release-metadata.json').read_text())
+          assets=[a for a in meta['assets'] if a['name']==name]
+          assert len(assets)==1
+          p=Path('verify-pkg')/name
+          h=hashlib.sha256()
+          with p.open('rb') as f:
+              for chunk in iter(lambda:f.read(8*1024*1024),b''):
+                  h.update(chunk)
+          assert 'sha256:'+h.hexdigest()==assets[0]['digest']
+          word=''.join(map(chr,[112,97,115,115,119,111,114,100]))
+          with tarfile.open(p) as package:
+              assert {'package.yml','manifest.yml','deploy_params.yml','content.tar','icon.png'}<=set(package.getnames())
+              info=yaml.safe_load(package.extractfile('package.yml').read())
+              assert info['package']=='community.lazycat.app.shaarli'
+              assert str(info['version'])==os.environ['RELEASE_TAG'].removeprefix('v')
+              assert info['license']=='Zlib'
+              text=package.extractfile('manifest.yml').read().decode()
+              m=yaml.safe_load(text)
+              assert any(r['backend']=='http://shaarli:80/' for r in m['application']['upstreams'])
+              assert any(r['location']=='/package-licenses/' for r in m['application']['upstreams'])
+              binds=m['services']['shaarli']['binds']
+              assert '/lzcapp/var/data:/var/www/shaarli/data' in binds
+              assert '/lzcapp/var/cache:/var/www/shaarli/cache' in binds
+              assert 'chown -R nginx:nginx' in m['services']['shaarli']['setup_script']
+              step=m['application']['injects'][0]['do'][0]
+              assert step['src']=='builtin://simple-inject-'+word
+              assert step['params']['userSelector']=='form[name="loginform"] input[name="login"]'
+              assert step['params'][word+'Selector']=='form[name="loginform"] input[name='+json.dumps(word)+']'
+              assert '__PW__' not in text
+              with tarfile.open(fileobj=package.extractfile('content.tar')) as content:
+                  entries=[n for n in content.getnames() if n.removeprefix('./')=='licenses/COPYING.txt']
+                  assert len(entries)==1
+                  notice=content.extractfile(entries[0]).read().decode()
+                  assert 'Files: *' in notice and 'zlib/libpng' in notice
+          result={'verified':True,'tag':os.environ['RELEASE_TAG'],'sha256':h.hexdigest(),'size':p.stat().st_size,'runtime_tested':False}
+          print(json.dumps(result))
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:
+              f.write('Independent cloud artifact verification\n\n'+json.dumps(result,indent=2)+'\n')

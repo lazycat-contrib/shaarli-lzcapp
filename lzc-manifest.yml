@@ -1,0 +1,41 @@
+application:
+  subdomain: shaarli
+  multi_instance: false
+  upstreams:
+    - location: /package-licenses/
+      backend: file:///lzcapp/pkg/content/licenses/
+    - location: /
+      backend: http://shaarli:80/
+  injects:
+    - id: login-autofill
+      on: browser
+      when:
+        - /
+      do:
+        - src: builtin://simple-inject-password
+          params:
+            user: |-
+              {{ .U.login_user | replace "\r" "" | replace "\n" "\n              " }}
+            password: |-
+              {{ .U.login_secret | replace "\r" "" | replace "\n" "\n              " }}
+            userSelector: 'form[name="loginform"] input[name="login"]'
+            passwordSelector: 'form[name="loginform"] input[name="password"]'
+            autoSubmit: false
+services:
+  shaarli:
+    # upstream: ghcr.io/shaarli/shaarli:v0.16.10
+    image: ghcr.1ms.run/shaarli/shaarli:v0.16.10
+    setup_script: |
+      mkdir -p /var/www/shaarli/data /var/www/shaarli/cache
+      chown -R nginx:nginx /var/www/shaarli/data /var/www/shaarli/cache
+    binds:
+      - /lzcapp/var/data:/var/www/shaarli/data
+      - /lzcapp/var/cache:/var/www/shaarli/cache
+usage: |
+  Shaarli是轻量个人书签与链接日志。首次须在原应用安装页面手动设置账号，使用与部署参数一致的用户名和密码；参数不会自动建号或重置已有配置。
+  登录页面在根路径的查询参数路由中，因此注入入口匹配根路径，但只填充form[name=loginform]内指定字段，不自动提交、不操作安装及其他管理表单。
+  保留懒猫入口认证；不开放匿名公共路径，原应用的公开分享/RSS/API仍需解决入口鉴权。当前填充账号仅授可信成员使用。
+  书签、配置与缓存分别在/lzcapp/var/data、/lzcapp/var/cache，卸载前备份数据目录。只修正这两个挂载目录的nginx属主，保留原S6入口，不强改容器用户。
+  核心按Zlib许可，上游素材按COPYING分别授权，完整声明保留在/package-licenses/COPYING.txt；包装图标仅缩放，不改原应用代码。
+  不新增smoke、健康检查、启动测试作业或文件选择器拦截。
+  未验证实机启动、首次安装、登录填充、书签增删改、导入导出、对外分享或持久化。

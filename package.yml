@@ -1,0 +1,18 @@
+package: community.lazycat.app.shaarli
+version: 0.16.10
+name: Shaarli
+description: Lightweight personal bookmark manager and link journal without an external database.
+min_os_version: "1.5.0"
+homepage: https://github.com/shaarli/Shaarli
+author: shaarli
+license: Zlib
+permissions:
+  required:
+    - net.internet
+locales:
+  zh:
+    name: Shaarli
+    description: 轻量个人书签管理与链接日志，使用文件型存储，无需外部数据库。
+  en:
+    name: Shaarli
+    description: Lightweight personal bookmark manager and link journal without an external database.
